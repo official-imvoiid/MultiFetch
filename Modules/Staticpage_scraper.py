@@ -18,6 +18,7 @@ import traceback
 import json
 import sys
 import cloudscraper
+from tqdm import tqdm
 
 class CloudflareWebScraper:
     def __init__(self):
@@ -191,8 +192,14 @@ class CloudflareWebScraper:
 
         downloaded_count = 0
         downloaded_hashes = set()
+        
+        # Remove duplicates from images list
+        unique_images = list(set(images))
+        
+        # Initialize progress bar
+        progress_bar = tqdm(total=len(unique_images), desc="Processing images", unit="img")
 
-        for idx, img_url in enumerate(list(set(images)), 1):
+        for idx, img_url in enumerate(unique_images, 1):
             try:
                 if self.scraper:
                     response = self.scraper.get(img_url, timeout=10)
@@ -200,20 +207,22 @@ class CloudflareWebScraper:
                     if response.status_code == 200:
                         content_type = response.headers.get('content-type', '').lower()
                         if not content_type.startswith('image/'):
-                            print(f"Skipping non-image content from {img_url}")
+                            progress_bar.update(1)
                             continue
 
                         try:
                             img_data = response.content
                             img = Image.open(io.BytesIO(img_data))
 
+                            # Skip small images (under 215x215)
                             if img.width < 215 or img.height < 215:
-                                print(f"Skipping image {img_url} due to small dimensions ({img.width}x{img.height})")
+                                progress_bar.update(1)
                                 continue
 
+                            # Skip duplicate images
                             img_hash = hash(img_data)
                             if img_hash in downloaded_hashes:
-                                print(f"Skipping duplicate image: {img_url}")
+                                progress_bar.update(1)
                                 continue
                             downloaded_hashes.add(img_hash)
 
@@ -227,19 +236,26 @@ class CloudflareWebScraper:
                             img.save(filepath, format='PNG')
 
                             downloaded_count += 1
-                            print(f"Downloaded and converted image: {filename}")
+                            progress_bar.write(f"✓ Downloaded and converted: {filename}")
 
                         except IOError:
-                            print(f"Could not open or process image from {img_url}. It might be corrupt or not a valid image.")
+                            # Skip corrupt or invalid images silently
+                            pass
                         except Exception as e:
-                             print(f"Error processing image {img_url}: {e}")
+                            # Skip images with processing errors silently
+                            pass
 
                 else:
-                    print("Cloudflare scraper not initialized, skipping image download.")
+                    break  # Exit if cloudflare scraper not initialized
+
+                progress_bar.update(1)
 
             except Exception as e:
-                print(f"Image download failed for {img_url}: {e}")
+                # Skip images with download errors silently
+                progress_bar.update(1)
+                continue
 
+        progress_bar.close()
         return downloaded_count
 
     def display_static_site_warning(self):
@@ -247,7 +263,7 @@ class CloudflareWebScraper:
         Displays a warning about scraping static websites
         """
         print("\n" + "="*80)
-        print(" STATIC WEBSITE SCRAPER - IMPORTANT NOTICE ".center(80, "="))
+        print(" STATIC WEBSITE SCRAPER - IMPORTANT NOTICE ".center(80))
         print("="*80)
         print("""
 This tool is designed for scraping STATIC websites like blogs, news sites, and 
@@ -255,15 +271,11 @@ informational pages. Please note:
 
 1. LEGAL CONSIDERATIONS: Always check the website's Terms of Service and robots.txt
    before scraping. Many sites prohibit automated scraping.
-
 2. RATE LIMITING: Use delays between requests to avoid overwhelming servers.
-
 3. DYNAMIC CONTENT: This scraper may not capture JavaScript-loaded content on some 
    modern websites that rely heavily on client-side rendering.
-
 4. STRUCTURED DATA: For sites with specific data patterns (e.g., product listings),
    you may need to modify the extraction logic.
-
 5. ETHICAL USE: Only use scraped content in accordance with copyright laws and 
    fair use principles.
 

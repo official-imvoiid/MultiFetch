@@ -1,12 +1,10 @@
 beautifulsoup4
 cloudscraper
 numpy
-opencv-python
 pillow
 requests
-scikit-image
-scipy
 selenium
 tqdm
 urllib3
 webdriver-manager
+absl-py  

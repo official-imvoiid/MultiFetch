@@ -13,9 +13,19 @@ import re
 import sys
 from PIL import Image
 import io
+from tqdm import tqdm
+
+def clear_screen():
+    # For Windows
+    if os.name == "nt":
+        os.system("cls")
+    # For Linux / macOS
+    else:
+        os.system("clear")
 
 def show_terms_and_disclaimer():
     """Show terms of service and disclaimer"""
+    print("")
     print("🎨 PIXIV IMAGE DOWNLOADER")
     print("=" * 60)
     print("⚠️  TERMS OF SERVICE & DISCLAIMER")
@@ -46,15 +56,16 @@ def show_terms_and_disclaimer():
 
 def show_phpsessid_instructions():
     """Show instructions for getting PHPSESSID"""
+    clear_screen()
     print("\n🔑 HOW TO GET YOUR PIXIV PHPSESSID:")
     print("=" * 60)
-    print("📝 METHOD 1 - Browser Cookie Editor (RECOMMENDED):")
+    print("🔍 METHOD 1 - Browser Cookie Editor (RECOMMENDED):")
     print("1. Install a browser cookie editor extension")
     print("2. Go to pixiv.net and login")
     print("3. Open the cookie editor extension")
     print("4. Find and copy the 'PHPSESSID' value")
     print()
-    print("📝 METHOD 2 - Developer Tools:")
+    print("🔍 METHOD 2 - Developer Tools:")
     print("1. Open your browser and go to pixiv.net")
     print("2. Login to your account")
     print("3. Open Developer Tools (F12)")
@@ -80,6 +91,9 @@ class SimplifiedPixivDownloader:
         
         # Image counter for numbering
         self.image_counter = 1
+        
+        # Progress bar (will be initialized when we know max_images)
+        self.progress_bar = None
         
         # Setup session with retry strategy
         self.session = requests.Session()
@@ -184,7 +198,8 @@ class SimplifiedPixivDownloader:
                     hash_md5.update(chunk)
             return hash_md5.hexdigest()
         except Exception as e:
-            print(f"Error calculating hash for {file_path}: {e}")
+            if self.progress_bar is not None:
+                self.progress_bar.write(f"Error calculating hash for {file_path}: {e}")
             return None
             
     def search_artworks(self, tag, page=1):
@@ -205,21 +220,25 @@ class SimplifiedPixivDownloader:
         }
         
         try:
-            print(f"🔍 Searching page {page} for '{tag}'...")
+            if self.progress_bar is not None:
+                self.progress_bar.write(f"🔍 Searching page {page} for '{tag}'...")
             response = self.session.get(url, params=params, timeout=30)
             response.raise_for_status()
             
             data = response.json()
             if data.get('error'):
-                print(f"❌ API Error: {data.get('message', 'Unknown error')}")
+                if self.progress_bar is not None:
+                    self.progress_bar.write(f"❌ API Error: {data.get('message', 'Unknown error')}")
                 return None
                 
             return data.get('body', {})
         except requests.exceptions.RequestException as e:
-            print(f"❌ Request failed: {e}")
+            if self.progress_bar is not None:
+                self.progress_bar.write(f"❌ Request failed: {e}")
             return None
         except json.JSONDecodeError as e:
-            print(f"❌ JSON decode error: {e}")
+            if self.progress_bar is not None:
+                self.progress_bar.write(f"❌ JSON decode error: {e}")
             return None
             
     def get_artwork_details(self, artwork_id):
@@ -232,12 +251,14 @@ class SimplifiedPixivDownloader:
             
             data = response.json()
             if data.get('error'):
-                print(f"❌ Error getting artwork {artwork_id}: {data.get('message', 'Unknown error')}")
+                if self.progress_bar is not None:
+                    self.progress_bar.write(f"❌ Error getting artwork {artwork_id}: {data.get('message', 'Unknown error')}")
                 return None
                 
             return data.get('body', {})
         except requests.exceptions.RequestException as e:
-            print(f"❌ Failed to get artwork details for {artwork_id}: {e}")
+            if self.progress_bar is not None:
+                self.progress_bar.write(f"❌ Failed to get artwork details for {artwork_id}: {e}")
             return None
             
     def get_artwork_pages(self, artwork_id):
@@ -250,12 +271,14 @@ class SimplifiedPixivDownloader:
             
             data = response.json()
             if data.get('error'):
-                print(f"❌ Error getting pages for {artwork_id}: {data.get('message', 'Unknown error')}")
+                if self.progress_bar is not None:
+                    self.progress_bar.write(f"❌ Error getting pages for {artwork_id}: {data.get('message', 'Unknown error')}")
                 return None
                 
             return data.get('body', [])
         except requests.exceptions.RequestException as e:
-            print(f"❌ Failed to get artwork pages for {artwork_id}: {e}")
+            if self.progress_bar is not None:
+                self.progress_bar.write(f"❌ Failed to get artwork pages for {artwork_id}: {e}")
             return None
             
     def sanitize_filename(self, filename, max_length=100):
@@ -319,7 +342,8 @@ class SimplifiedPixivDownloader:
             self.stats['converted'] += 1
             return True
         except Exception as e:
-            print(f"❌ Failed to convert image to PNG: {e}")
+            if self.progress_bar is not None:
+                self.progress_bar.write(f"❌ Failed to convert image to PNG: {e}")
             return False
             
     def download_and_convert_image(self, url, output_path, referer_id, artist_name):
@@ -346,13 +370,15 @@ class SimplifiedPixivDownloader:
                 
                 # Convert to PNG and save with fast method
                 if self.convert_to_png_fast(image_data, output_path):
-                    print(f"✅ Downloaded & converted: {output_path.name}")
+                    if self.progress_bar is not None:
+                        self.progress_bar.write(f"✅ Downloaded & converted: {output_path.name}")
                     return True
                 else:
                     return False
                     
             except requests.exceptions.RequestException as e:
-                print(f"❌ Attempt {attempt + 1} failed for {url}: {e}")
+                if self.progress_bar is not None:
+                    self.progress_bar.write(f"❌ Attempt {attempt + 1} failed for {url}: {e}")
                 if attempt < max_retries - 1:
                     time.sleep(2 ** attempt)  # Exponential backoff
                 else:
@@ -403,13 +429,11 @@ class SimplifiedPixivDownloader:
         # Check if already downloaded
         is_downloaded, existing_path = self.is_already_downloaded(artwork_id)
         if is_downloaded:
-            print(f"⏭️  Skipping {artwork_id} - already downloaded")
             self.stats['skipped'] += 1
             return True
             
         # Check if we've reached max images
         if max_images and self.stats['downloaded'] >= max_images:
-            print(f"🏁 Reached maximum images limit ({max_images})")
             return False
             
         # Get detailed artwork information
@@ -424,8 +448,6 @@ class SimplifiedPixivDownloader:
         
         # Create safe artist name
         safe_artist = self.sanitize_filename(artist_name)
-        
-        print(f"📥 Downloading: {title} by {artist_name} (ID: {artwork_id}) - {page_count} page(s)")
         
         # Create tag directory: PixivImages/TopicName/
         tag_dir = self.download_dir / self.sanitize_filename(source_tag)
@@ -444,14 +466,16 @@ class SimplifiedPixivDownloader:
                     file_hash = self.calculate_file_hash(file_path)
                     self.save_to_database(details, file_path, file_hash, source_tag, self.image_counter)
                     self.stats['downloaded'] += 1
+                    if self.progress_bar is not None:
+                        self.progress_bar.update(1)
                     self.image_counter += 1
                     success = True
                 else:
-                    print(f"❌ Failed to download: {filename}")
                     self.stats['failed'] += 1
                     
             except Exception as e:
-                print(f"❌ Error downloading single image {artwork_id}: {e}")
+                if self.progress_bar is not None:
+                    self.progress_bar.write(f"❌ Error downloading single image {artwork_id}: {e}")
                 self.stats['failed'] += 1
                 
         else:
@@ -465,7 +489,6 @@ class SimplifiedPixivDownloader:
             for i, page in enumerate(pages):
                 # Check if we've reached max images
                 if max_images and self.stats['downloaded'] >= max_images:
-                    print(f"🏁 Reached maximum images limit ({max_images})")
                     break
                     
                 try:
@@ -478,35 +501,33 @@ class SimplifiedPixivDownloader:
                         self.save_to_database(details, file_path, file_hash, source_tag, self.image_counter)
                         success_count += 1
                         self.stats['downloaded'] += 1
+                        if self.progress_bar is not None:
+                            self.progress_bar.update(1)
                         self.image_counter += 1
-                        print(f"✅ Downloaded page {i+1}/{len(pages)}: {filename}")
-                    else:
-                        print(f"❌ Failed to download page {i+1}/{len(pages)}")
                         
                     # Small delay between pages
                     time.sleep(0.3)  # Reduced delay for speed
                     
                 except Exception as e:
-                    print(f"❌ Error downloading page {i+1}: {e}")
+                    if self.progress_bar is not None:
+                        self.progress_bar.write(f"❌ Error downloading page {i+1}: {e}")
                     continue
                     
             if success_count > 0:
-                print(f"✅ Downloaded manga: {success_count}/{len(pages)} pages")
                 success = True
             else:
-                print(f"❌ Failed to download any pages of manga {artwork_id}")
                 self.stats['failed'] += 1
                 
         return success
         
     def bulk_download_by_tag(self, tag, max_images=None, delay=0.8):  # Reduced delay for speed
         """Download all artworks for a given tag - GETS ALL PAGES"""
-        print(f"🚀 Starting bulk download for tag: '{tag}'")
-        print(f"📁 Download directory: {self.download_dir.absolute()}")
-        print(f"📊 Target images: {max_images or 'ALL AVAILABLE'}")
-        print(f"🔞 Content: ALL (NSFW content will appear if your Pixiv account settings have NSFW enabled.)")
-        print(f"⚡ Fast PNG conversion mode: ENABLED")
-        print("=" * 60)
+        # Initialize progress bar ]
+        if max_images is not None:
+            self.progress_bar = tqdm(total=max_images, desc="Downloading images", unit="img")
+        else:
+            # For unlimited downloads, use a counter-style progress bar
+            self.progress_bar = tqdm(desc="Downloading images", unit="img", total=None)
         
         page = 1
         consecutive_failures = 0
@@ -515,20 +536,20 @@ class SimplifiedPixivDownloader:
         while True:
             # Check if we've reached max images
             if max_images and self.stats['downloaded'] >= max_images:
-                print(f"🏁 Reached target of {max_images} images!")
+                self.progress_bar.write(f"🎯 Reached target of {max_images} images!")
                 break
                 
             # Check for too many consecutive failures
             if consecutive_failures >= max_consecutive_failures:
-                print(f"❌ Too many consecutive failures ({consecutive_failures}). Stopping.")
+                self.progress_bar.write(f"❌ Too many consecutive failures ({consecutive_failures}). Stopping.")
                 break
                 
             search_results = self.search_artworks(tag, page)
             if not search_results:
                 consecutive_failures += 1
-                print(f"❌ Failed to get search results for page {page}")
+                self.progress_bar.write(f"❌ Failed to get search results for page {page}")
                 if consecutive_failures < max_consecutive_failures:
-                    print(f"🔄 Retrying in 5 seconds... (Attempt {consecutive_failures}/{max_consecutive_failures})")
+                    self.progress_bar.write(f"🔄 Retrying in 5 seconds... (Attempt {consecutive_failures}/{max_consecutive_failures})")
                     time.sleep(5)
                 continue
                 
@@ -542,7 +563,7 @@ class SimplifiedPixivDownloader:
             
             # Check if we've reached the end
             if not artworks:
-                print("✅ No more artworks found - reached end of results")
+                self.progress_bar.write("✅ No more artworks found - reached end of results")
                 break
                 
             # Check if this is the last page according to API
@@ -550,15 +571,11 @@ class SimplifiedPixivDownloader:
             total_available = illust_manga.get('total', 0)
             
             self.stats['total_found'] += total_on_page
-            print(f"📊 Page {page}: Found {total_on_page} artworks")
-            print(f"📈 Total found so far: {self.stats['total_found']}")
-            print(f"📋 Total available: {total_available}")
-            print(f"📥 Downloaded so far: {self.stats['downloaded']}")
+            self.progress_bar.write(f"📊 Page {page}: Found {total_on_page} artworks")
             
             page_success = 0
             for i, artwork in enumerate(artworks, 1):
                 try:
-                    print(f"\n[{i}/{total_on_page}] ", end="")
                     if self.download_artwork(artwork, tag, max_images):
                         page_success += 1
                     else:
@@ -570,33 +587,31 @@ class SimplifiedPixivDownloader:
                     time.sleep(delay)
                     
                 except KeyboardInterrupt:
-                    print("\n⏹️  Download interrupted by user")
+                    self.progress_bar.write("\nℹ️  Download interrupted by user")
+                    self.progress_bar.close()
                     return self.print_final_stats()
                 except Exception as e:
-                    print(f"❌ Error processing artwork {artwork.get('id', 'unknown')}: {e}")
+                    self.progress_bar.write(f"❌ Error processing artwork {artwork.get('id', 'unknown')}: {e}")
                     self.stats['failed'] += 1
                     continue
-                    
-            print(f"\n📈 Page {page} completed: {page_success} downloaded, "
-                  f"{total_on_page - page_success} skipped/failed")
             
             # Check if we've reached max images
             if max_images and self.stats['downloaded'] >= max_images:
-                print(f"🏁 Reached target of {max_images} images!")
+                self.progress_bar.write(f"🎯 Reached target of {max_images} images!")
                 break
                 
             # Check if there are more pages
             if is_last_page:
-                print("✅ Reached last page according to API")
+                self.progress_bar.write("✅ Reached last page according to API")
                 break
                 
             # Continue to next page
             page += 1
-            print(f"➡️  Moving to page {page}...")
             
             # Shorter delay between pages for speed
             time.sleep(1.5)
         
+        self.progress_bar.close()
         return self.print_final_stats()
         
     def print_final_stats(self):
@@ -607,7 +622,7 @@ class SimplifiedPixivDownloader:
         print(f"📊 Final Statistics:")
         print(f"   📥 Total Downloaded: {self.stats['downloaded']}")
         print(f"   ⚡ Total Converted to PNG: {self.stats['converted']}")
-        print(f"   ⏭️  Total Skipped: {self.stats['skipped']}")
+        print(f"   ⭐️  Total Skipped: {self.stats['skipped']}")
         print(f"   ❌ Total Failed: {self.stats['failed']}")
         print(f"   🔍 Total Found: {self.stats['total_found']}")
         print(f"   📁 Download Directory: {self.download_dir.absolute()}")
@@ -620,6 +635,7 @@ class SimplifiedPixivDownloader:
 
 def get_user_input():
     """Get user input for tag and image count"""
+    clear_screen()
     print("\n🎨 Simplified Pixiv Downloader")
     print("🔞 Always downloads ALL content (NSFW content will appear if your Pixiv account settings have NSFW enabled.)")
     print("📁 Structure: PixivImages/TopicName/1_ArtistName.png, 2_ArtistName.png")
@@ -665,12 +681,12 @@ def main():
     
     # Get user preferences
     tag, max_images = get_user_input()
-    
+    clear_screen()
     print(f"\n🚀 Starting download with settings:")
     print(f"   🏷️  Tag: {tag}")
     print(f"   📊 Images: {max_images or 'ALL AVAILABLE'}")
     print(f"   🔞 Content: ALL (NSFW content will appear if your Pixiv account settings have NSFW enabled.)")
-    print(f"   📁 Format: All converted to PNG (FAST MODE)")
+    print(f"   🎨 Format: All converted to PNG (FAST MODE)")
     print(f"   📂 Structure: PixivImages/{tag}/1_ArtistName.png, 2_ArtistName.png...")
     
     # Initialize downloader
@@ -688,7 +704,7 @@ def main():
             delay=0.8  # Faster delay
         )
     except KeyboardInterrupt:
-        print("\n⏹️  Download interrupted by user")
+        print("\nℹ️  Download interrupted by user")
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
         import traceback

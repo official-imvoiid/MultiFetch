@@ -12,22 +12,53 @@ import mimetypes
 from PIL import Image
 import io
 
+def clear_screen():
+    # For Windows
+    if os.name == "nt":
+        os.system("cls")
+    # For Linux / macOS
+    else:
+        os.system("clear")
+
+def display_header():
+    """Display the professional header with terms and conditions"""
+    print("")
+    print("🎨 DEVIANTART IMAGE DOWNLOADER")
+    print("=" * 60)
+    print("\t⚠️  TERMS OF SERVICE & DISCLAIMER")
+    print("=" * 60)
+    print("📋 TERMS:")
+    print("• This tool is for PERSONAL and RESEARCH use ONLY")
+    print("• You must RESPECT DeviantArt's Terms of Service")
+    print("• Downloaded content must NOT be redistributed commercially")
+    print("• You are responsible for respecting artists' rights")
+    print("• Use downloaded content in accordance with copyright laws")
+    print()
+    print("🚫 DISCLAIMER:")
+    print("• Developer is NOT responsible for misuse of this tool")
+    print("• Users are solely responsible for their actions")
+    print("• This tool is provided 'AS IS' without warranties")
+    print("• By using this tool, you accept full responsibility")
+    print("=" * 60)
+
 class DeviantArtScraper:
     def __init__(self, topic, max_images=1000, output_dir="DeviantArt"):
         self.topic = topic
         self.max_images = max_images
-        self.output_dir = output_dir
+        # Create folder structure: DeviantArt/topic_name/
+        self.output_dir = os.path.join(output_dir, topic)
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         }
         self.downloaded_count = 0
         self.processed_urls = set()
-        self.progress_bar = tqdm(total=max_images, desc="Downloading images", unit="img")
-        
+        self.progress_bar = None  # Initialize as None, create when first download succeeds
+
+        clear_screen()
         # Create output directory if it doesn't exist
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-            print(f"Created directory: {output_dir}")
+        if not os.path.exists(self.output_dir):
+            os.makedirs(self.output_dir)
+            print(f"📁 Created directory: {self.output_dir}")
     
     def download_image(self, img_url, base_url):
         """Downloads the image from the URL and ensures it's in JPG format"""
@@ -38,7 +69,6 @@ class DeviantArtScraper:
             
             # Skip icons and small images based on URL patterns
             if any(pattern in img_url.lower() for pattern in ['/avatars/', '/icons/', '/emoticons/', '/thumbs/', 'thumbnail', 'icon', 'avatar']):
-                self.progress_bar.write(f"Skipping potential icon: {img_url}")
                 return False
             
             # If it's just the artwork page URL rather than direct image
@@ -48,13 +78,11 @@ class DeviantArtScraper:
                 if image_urls and image_urls[0] != img_url:  # If we found an actual image
                     return self.download_image(image_urls[0], base_url)
                 else:
-                    self.progress_bar.write(f"Skipping artwork page URL (no direct image found): {img_url}")
                     return False
             
             # Download the image content
             response = requests.get(img_url, headers=self.headers, stream=True)
             if response.status_code != 200:
-                self.progress_bar.write(f"Failed to download {img_url}. Status code: {response.status_code}")
                 return False
             
             # Get content type from response headers
@@ -62,7 +90,6 @@ class DeviantArtScraper:
             
             # Skip if not an image content type
             if 'image' not in content_type:
-                self.progress_bar.write(f"Skipping non-image content: {img_url}")
                 return False
                 
             # Check image size before downloading completely
@@ -72,7 +99,6 @@ class DeviantArtScraper:
                 
                 # Skip small images that are likely icons (under 500px width or height)
                 if width < 500 or height < 500:
-                    self.progress_bar.write(f"Skipping small image (possibly icon): {img_url} - Size: {width}x{height}")
                     return False
                 
                 # Generate a base filename without extension (will add .jpg later)
@@ -85,7 +111,7 @@ class DeviantArtScraper:
                 
                 # Add timestamp to prevent overwriting
                 timestamp = int(time.time())
-                file_name = f"{file_name}_{timestamp}.jpg"  # Force JPG extension
+                file_name = f"{self.downloaded_count + 1}_{file_name}_{timestamp}.jpg"  # Force JPG extension with counter
                 
                 # Full path to save the image
                 file_path = os.path.join(self.output_dir, file_name)
@@ -98,15 +124,18 @@ class DeviantArtScraper:
                 
                 # Save as JPG
                 img.convert('RGB').save(file_path, 'JPEG', quality=95)
-                self.progress_bar.write(f"Downloaded and converted to JPG: {file_name} - Size: {width}x{height}")
+                
+                # Create progress bar on first successful download
+                if self.progress_bar is None:
+                    self.progress_bar = tqdm(total=self.max_images, desc="Downloading images", unit="img")
+                
+                self.progress_bar.write(f"✅ Downloaded & converted: {file_name}")
                 return True
                 
             except Exception as e:
-                self.progress_bar.write(f"Error processing image {img_url}: {e}")
                 return False
                 
         except Exception as e:
-            self.progress_bar.write(f"Error downloading {img_url}: {e}")
             return False
     
     def extract_image_urls(self, page_url):
@@ -178,10 +207,8 @@ class DeviantArtScraper:
                     # If no images found, we'll still return the artwork page itself
                     # The download method will handle it properly
                     image_urls.append(base_url)
-            else:
-                self.progress_bar.write(f"Failed to access {base_url}. Status code: {response.status_code}")
         except Exception as e:
-            self.progress_bar.write(f"Error processing {base_url}: {e}")
+            pass
         
         return image_urls
     
@@ -195,7 +222,8 @@ class DeviantArtScraper:
             search_term = quote_plus(self.topic)
             search_url = f"https://www.deviantart.com/search?q={search_term}&page={page}"
             
-            self.progress_bar.write(f"Searching page {page} for '{self.topic}'...")
+            # Use print instead of progress_bar.write since progress_bar might not exist yet
+            print(f"🔍 Searching page {page} for '{self.topic}'...")
             try:
                 response = requests.get(search_url, headers=self.headers)
                 if response.status_code == 200:
@@ -214,14 +242,14 @@ class DeviantArtScraper:
                     
                     if not artwork_links:
                         consecutive_empty_pages += 1
-                        self.progress_bar.write(f"No artwork links found on page {page}. Empty pages: {consecutive_empty_pages}/{max_empty_pages}")
+                        print(f"❌ No artwork links found on page {page}. Empty pages: {consecutive_empty_pages}/{max_empty_pages}")
                         page += 1
-                        time.sleep(random.uniform(2.0, 4.0))
+                        time.sleep(random.uniform(1.5, 3.0))  # Reduced delay
                         continue
                     else:
                         consecutive_empty_pages = 0  # Reset counter when we find links
                     
-                    self.progress_bar.write(f"Found {len(artwork_links)} artwork links on page {page}")
+                    print(f"📊 Page {page}: Found {len(artwork_links)} artworks")
                     
                     # Process each artwork page
                     for link in artwork_links:
@@ -237,45 +265,62 @@ class DeviantArtScraper:
                             # Download the image
                             if self.download_image(img_url, link):
                                 self.downloaded_count += 1
-                                self.progress_bar.update(1)
+                                if self.progress_bar:  # Only update if progress bar exists
+                                    self.progress_bar.update(1)
                                 
-                                # Brief delay between downloads
-                                time.sleep(random.uniform(0.5, 1.5))
+                                # Brief delay between downloads (reduced)
+                                time.sleep(random.uniform(0.3, 1.0))
                     
                     # If we still need more images, move to the next page
                     if self.downloaded_count < self.max_images:
                         page += 1
-                        # Random delay between page requests
-                        time.sleep(random.uniform(2.0, 4.0))
+                        # Random delay between page requests (reduced)
+                        time.sleep(random.uniform(1.5, 3.0))
                     else:
                         break
                 else:
-                    self.progress_bar.write(f"Failed to access search page. Status code: {response.status_code}")
+                    print(f"❌ Failed to access search page. Status code: {response.status_code}")
                     break
             except Exception as e:
-                self.progress_bar.write(f"Error during search: {e}")
+                print(f"❌ Error during search: {e}")
                 break
         
-        self.progress_bar.close()
-        print(f"\nDownloaded {self.downloaded_count} images related to '{self.topic}' to '{self.output_dir}'")
+        if self.progress_bar:
+            self.progress_bar.close()
+        print(f"\n🎉 Downloaded {self.downloaded_count} images related to '{self.topic}' to '{self.output_dir}'")
 
 def main():
+    # Display professional header and terms
+    display_header()
+    
+    # Get user agreement to terms
+    while True:
+        agreement = input("Do you agree to these terms? (yes/no): ").lower().strip()
+        if agreement in ['yes', 'y']:
+            break
+        elif agreement in ['no', 'n']:
+            print("❌ Terms not accepted. Exiting...")
+            return
+        else:
+            print("⚠️  Please enter 'yes' or 'no'")
+    
+    # Get user inputs
+    clear_screen()
     topic = input("Enter your search topic: ")
     try:
         max_images = int(input("Enter maximum number of images to download (default 1000): ") or 1000)
     except ValueError:
         max_images = 1000
-        print("Invalid input. Using default value of 1000 images.")
+        print("⚠️  Invalid input. Using default value of 1000 images.")
     
     output_dir = input(f"Enter output directory (default 'DeviantArt'): ") or "DeviantArt"
     
-    print(f"Starting DeviantArt image downloader for topic: '{topic}'")
-    print(f"Will download up to {max_images} images to folder: '{output_dir}'")
-    print("Note: Please be respectful of DeviantArt's Terms of Service and Artists' Copyrights.\n")
+    print(f"Will download up to {max_images} images to folder: '{output_dir}/{topic}'")
+    print(f"🚀 Start DeviantArt image downloader for topic: '{topic}'?")
     
     proceed = input("Do you want to proceed? (y/n): ")
     if proceed.lower() != 'y':
-        print("Operation cancelled.")
+        print("❌ Operation cancelled.")
         return
     
     scraper = DeviantArtScraper(topic, max_images, output_dir)

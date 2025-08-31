@@ -130,7 +130,7 @@ goto menu
 
 :pintrest
 cls
-python Modules\python Pintrest_scraper.py 
+python Modules\Pintrest_scraper.py 
 echo.
 echo Press any key to return to the menu...
 pause > nul
